@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<beans xmlns="http://www.springframework.org/schema/beans"
+       xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:context="http://www.springframework.org/schema/context"
+       xmlns:aop="http://www.springframework.org/schema/aop" xmlns:tx="http://www.springframework.org/schema/tx"
+       xmlns:jpa="http://www.springframework.org/schema/data/jpa"
+       xsi:schemaLocation="http://www.springframework.org/schema/beans
+    http://www.springframework.org/schema/beans/spring-beans.xsd
+    http://www.springframework.org/schema/context
+	http://www.springframework.org/schema/context/spring-context.xsd
+	http://www.springframework.org/schema/aop
+	http://www.springframework.org/schema/aop/spring-aop.xsd
+	http://www.springframework.org/schema/tx
+	http://www.springframework.org/schema/tx/spring-tx.xsd
+    http://www.springframework.org/schema/data/jpa
+    http://www.springframework.org/schema/data/jpa/spring-jpa.xsd">
+    <bean id="jpaVendorAdapter" class="org.springframework.orm.jpa.vendor.HibernateJpaVendorAdapter">
+        <property name="showSql" value="true"/>
+        <property name="generateDdl" value="false"/>
+        <property name="database" value="ORACLE"/>
+    </bean>
+    <bean class="org.springframework.orm.jpa.LocalContainerEntityManagerFactoryBean" id="entityManagerFactory">
+        <property name="dataSource" ref="dataSource"/>
+        <property name="packagesToScan" value="org.kunteng.ktopenapi.module"/>
+        <property name="jpaVendorAdapter" ref="jpaVendorAdapter"/>
+        <property name="persistenceUnitPostProcessors">
+            <list>
+                <bean class="org.springframework.data.jpa.support.ClasspathScanningPersistenceUnitPostProcessor">
+                    <constructor-arg value="org.kunteng.ktopenapi.module" />
+                </bean>
+            </list>
+        </property>
+    </bean>
+
+    <!-- 配置事务管理器 -->
+    <bean id="jpaTransactionManager" class="org.springframework.orm.jpa.JpaTransactionManager">
+        <property name="entityManagerFactory" ref="entityManagerFactory"/>
+    </bean>
+
+    <!-- 启用 annotation事务 -->
+    <tx:annotation-driven transaction-manager="jpaTransactionManager"/>
+    <jpa:repositories base-package="org.kunteng.ktopenapi.module" transaction-manager-ref="jpaTransactionManager" entity-manager-factory-ref="entityManagerFactory"/>
+
+
+
+</beans>
