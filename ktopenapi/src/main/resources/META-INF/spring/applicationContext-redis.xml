@@ -46,6 +46,12 @@
     <bean id='cacheManager' class='org.springframework.data.redis.cache.RedisCacheManager'
           c:template-ref='redisTemplate'/>
     <cache:annotation-driven />-->
+    <!-- 
+        <bean id="clientDetailsService" class="org.kunteng.ktopenapi.oauth.token.CustomClientDetailsService"
+          p:redisTemplate-ref="redisSentinelTemplate"/>
+        
+         <bean id="authorizationCodeServices" class="org.kunteng.ktopenapi.oauth.token.OAuthAuthorizationCodeServices"
+          p:redisTemplate-ref="redisSentinelTemplate"/> -->
 
     <bean id="jedisPoolConfig" class="redis.clients.jedis.JedisPoolConfig">
         <property name="maxTotal" value="${redis.maxTotal}" />

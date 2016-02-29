@@ -1,8 +1,10 @@
 package org.kunteng.ktopenapi.core.redis;
 
+import org.kunteng.ktopenapi.util.SerializeUtil;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.data.redis.core.TimeoutUtils;
+
 import redis.clients.jedis.Jedis;
 import redis.clients.jedis.exceptions.JedisConnectionException;
 import redis.clients.jedis.exceptions.JedisException;
@@ -110,6 +112,38 @@ public class JedisSentinelTemplate {
             }
         });
     }
+    
+    public void set2Bean(final String key,final Object object)
+   {
+    	execute(new JedisActionNoResult() {
+            @Override
+            public void action(Jedis jedis) {
+                jedis.set(key.getBytes(), SerializeUtil.serialize(object));
+            }
+        });
+   }
+    
+    public void set2Beanex(final String key,final int seconds,final Object object)
+   {
+    	execute(new JedisActionNoResult() {
+            @Override
+            public void action(Jedis jedis) {
+                jedis.setex(key.getBytes(), seconds, SerializeUtil.serialize(object));
+            }
+        });
+   }
+    
+    public Object get2Bean(final String key) {
+        return execute(new JedisAction<Object>() {
+
+            @Override
+            public Object action(Jedis jedis) {
+            	byte[] value = jedis.get(key.getBytes());
+            	return SerializeUtil. unserialize(value);
+            }
+        });
+    }
+   
 
     public void setex(final String key, final String value, final long timeout, final TimeUnit unit) {
         Long seconds = TimeoutUtils.toSeconds(timeout, unit);

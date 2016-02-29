@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8" standalone="no"?>
+<beans xmlns="http://www.springframework.org/schema/beans" xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+       xmlns:oauth="http://www.springframework.org/schema/security/oauth2" xmlns:sec="http://www.springframework.org/schema/security"
+       xmlns:mvc="http://www.springframework.org/schema/mvc" xmlns:context="http://www.springframework.org/schema/context"
+       xsi:schemaLocation="http://www.springframework.org/schema/security/oauth2 http://www.springframework.org/schema/security/spring-security-oauth2-2.0.xsd
+		http://www.springframework.org/schema/mvc http://www.springframework.org/schema/mvc/spring-mvc-4.0.xsd
+		http://www.springframework.org/schema/context http://www.springframework.org/schema/context/spring-context-4.0.xsd
+		http://www.springframework.org/schema/security http://www.springframework.org/schema/security/spring-security-3.2.xsd
+		http://www.springframework.org/schema/beans http://www.springframework.org/schema/beans/spring-beans-4.0.xsd">
+    
+    <!--1.TokenStore, 使用JdbcTokenStore, 将token信息存放数据库, 需要提供一个dataSource对象; 也可使用InMemoryTokenStore存于内存中  -->
+    <bean id="tokenStore" class="org.springframework.security.oauth2.provider.token.store.JdbcTokenStore">
+        <constructor-arg index="0" ref="dataSource"/>
+    </bean>
+	<!-- 3.ClientDetailsService 配置, 使用JdbcClientDetailsService, 也需要提供dataSource, -->
+    <bean id="clientDetailsService" class="org.kunteng.ktopenapi.oauth.token.CustomClientDetailsService">
+       <property name="redisTemplate" ref="redisSentinelTemplate"/>
+        <constructor-arg index="0" ref="dataSource"/>
+    </bean>
+    <!-- 4. ClientDetailsUserDetailsService配置, 该类实现了Spring security中 UserDetailsService 接口 -->
+ 	<bean id="clientDetailsUserService" class="org.springframework.security.oauth2.provider.client.ClientDetailsUserDetailsService">
+        <constructor-arg ref="clientDetailsService" />
+    </bean>
+    <!-- 2.TokenServices; 需要注入TokenStore -->
+    <bean id="tokenServices" class="org.springframework.security.oauth2.provider.token.DefaultTokenServices">
+        <property name="accessTokenValiditySeconds" value="2592000"/><!-- 30天 -->
+        <property name="refreshTokenValiditySeconds" value="328500000"/><!-- 3650天 -->
+        <property name="tokenStore" ref="tokenStore" />
+        <!-- 如果允许刷新token 请将supportRefreshToken 的值设置为true, 默认为不允许 -->
+        <property name="supportRefreshToken" value="true" />
+        <property name="clientDetailsService" ref="clientDetailsService" />
+    </bean>
+
+	<!-- 用于生产code的类 -->
+    <bean id="authorizationCodeServices" class="org.kunteng.ktopenapi.oauth.token.OAuthAuthorizationCodeServices">
+        <property name="redisTemplate" ref="redisSentinelTemplate"/>
+    </bean>
+
+    <bean id="approvalStore" class="org.springframework.security.oauth2.provider.approval.JdbcApprovalStore">
+        <constructor-arg index="0" ref="dataSource"/>
+    </bean>
+
+    <bean id="requestFactory" class="org.springframework.security.oauth2.provider.request.DefaultOAuth2RequestFactory">
+        <constructor-arg index="0" ref="clientDetailsService"/>
+    </bean>
+
+    <bean id="userApprovalHandler" class="org.springframework.security.oauth2.provider.approval.ApprovalStoreUserApprovalHandler">
+        <property name="approvalStore" ref="approvalStore"/>
+        <property name="clientDetailsService" ref="clientDetailsService"/>
+        <property name="requestFactory" ref="requestFactory"/>
+    </bean>
+
+    <oauth:authorization-server client-details-service-ref="clientDetailsService" token-services-ref="tokenServices"
+                                user-approval-handler-ref="userApprovalHandler">
+        <oauth:authorization-code authorization-code-services-ref="authorizationCodeServices"/>
+        <oauth:implicit disabled="true"/>
+        <oauth:refresh-token />
+        <oauth:client-credentials disabled="true"/>
+        <oauth:password/>
+    </oauth:authorization-server>
+
+   
+	<!-- 判断用户身份Service -->
+    <bean id="defaultUserDetailsService" class="org.kunteng.ktopenapi.oauth.authentication.DefaultUserDetailsService">
+        <property name="userRepository" ref="userRepository"/>
+    </bean>
+
+    <authentication-manager alias="clientAuthenticationManager" xmlns="http://www.springframework.org/schema/security">
+        <authentication-provider ref="tokenAuthenticationProvider"/>
+        <authentication-provider ref="loginAuthenticationProvider"/>
+        <authentication-provider user-service-ref="clientDetailsUserService" />
+        <authentication-provider user-service-ref="defaultUserDetailsService"/>
+    </authentication-manager>
+
+    <bean id="clientCredentialsTokenEndpointFilter" class="org.springframework.security.oauth2.provider.client.ClientCredentialsTokenEndpointFilter">
+        <property name="authenticationManager" ref="clientAuthenticationManager" />
+        <property name="authenticationFailureHandler" ref="tokenAuthenticationFailureHandler"/>
+        <property name="authenticationEntryPoint" ref="oauth2AuthenticationEntryPoint"/>
+    </bean>
+
+	<!-- 自定义身份认证 -->
+    <bean id="tokenAuthenticationProvider" class="org.kunteng.ktopenapi.oauth.authentication.TokenAuthenticationProvider"/>
+
+    <bean id="oAuth2ExceptionRenderer" class="org.springframework.security.oauth2.provider.error.DefaultOAuth2ExceptionRenderer">
+        <property name="messageConverters">
+        	<!-- 类中属性名称   private List<HttpMessageConverter<?>> messageConverters -->
+            <list>
+                <bean class="org.springframework.http.converter.json.MappingJackson2HttpMessageConverter"/>
+            </list>
+        </property>
+    </bean>
+    <bean id="tokenAuthenticationFailureHandler" class="org.kunteng.ktopenapi.oauth.authentication.TokenAuthenticationFailureHandler">
+        <!-- oauth2的异常 见  id="oAuth2ExceptionRenderer" -->
+        <property name="exceptionRenderer" ref="oAuth2ExceptionRenderer"/>
+    </bean>
+    <bean id="oauthAccessDeniedHandler" class="org.springframework.security.oauth2.provider.error.OAuth2AccessDeniedHandler">
+        <property name="exceptionRenderer" ref="oAuth2ExceptionRenderer"/>
+    </bean>
+
+	<!-- 自定义 token处理Filter -->
+    <bean id="clientApiTokenProcessingFilter"
+          class="org.kunteng.ktopenapi.oauth.authentication.ClientApiTokenProcessingFilter">
+           <!-- 对应类中的属性名称 -->
+        <!-- <property name="customUSERMemcachedClient" ref="customUSERMemcachedClient"/> -->
+        <property name="redisTemplate" ref="redisSentinelTemplate"/>
+        <property name="oauthUserLoginService" ref="oauthUserLoginService"/>
+        <property name="authenticationManager" ref="clientAuthenticationManager" />
+        <property name="authenticationFailureHandler" ref="tokenAuthenticationFailureHandler"/>
+    </bean>
+
+	<!-- 获取token的访问 
+	http://112.33.2.95:8882/educloudapi/oauth/token?grant_type=authorization_code&code=MAAzL0YcSZbxQ6XC&client_id=Md4ZdFUk&client_secret=zdvO3KS55XKTvEaP&redirect_uri=oob 
+	-->
+    <http pattern="/oauth/token" create-session="stateless" authentication-manager-ref="clientAuthenticationManager"
+          xmlns="http://www.springframework.org/schema/security">
+        <intercept-url pattern="/oauth/token" access="IS_AUTHENTICATED_FULLY" />
+        <anonymous enabled="false" />
+        <http-basic entry-point-ref="oauth2AuthenticationEntryPoint" />
+        <!-- include this only if you need to authenticate clients via request parameters -->
+        <custom-filter ref="clientCredentialsTokenEndpointFilter" after="BASIC_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+
+	<!-- 先获取code的 
+	http://112.33.2.96:9002/educloudapi/oauth/authorize?response_type=code&client_id=Md4ZdFUk&redirect_uri=oob
+	 -->
+    <http pattern="/oauth/authorize" create-session="always" authentication-manager-ref="clientAuthenticationManager" entry-point-ref="loginEntryPoint"
+          xmlns="http://www.springframework.org/schema/security">
+        <intercept-url pattern="/oauth/authorize" access="ROLE_USER" />
+        <anonymous enabled="false" />
+        <!--<http-basic entry-point-ref="oauth2AuthenticationEntryPoint" />-->
+        <!-- include this only if you need to authenticate clients via request parameters -->
+        <custom-filter ref="clientApiTokenProcessingFilter" before="REQUEST_CACHE_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+
+
+    <bean id="oauth2AuthenticationEntryPoint"
+          class="org.springframework.security.oauth2.provider.error.OAuth2AuthenticationEntryPoint">
+        <property name="exceptionRenderer" ref="oAuth2ExceptionRenderer"/>
+    </bean>
+
+	<!-- 访问用户信息权限 -->
+    <oauth:resource-server id="user_info" resource-id="user_info" token-services-ref="tokenServices" entry-point-ref="oauth2AuthenticationEntryPoint"/>
+    <!-- 访问登录 -->
+    <oauth:resource-server id="log_record" resource-id="log_record" token-services-ref="tokenServices" entry-point-ref="oauth2AuthenticationEntryPoint"/>
+    <!-- 访问基础 -->
+    <oauth:resource-server id="base" resource-id="base" token-services-ref="tokenServices" entry-point-ref="oauth2AuthenticationEntryPoint"/>
+    <!-- 访问发送 -->
+    <oauth:resource-server id="message_send" resource-id="message_send" token-services-ref="tokenServices" entry-point-ref="oauth2AuthenticationEntryPoint"/>
+    
+    <oauth:resource-server id="resource" resource-id="resource" token-services-ref="tokenServices" entry-point-ref="oauth2AuthenticationEntryPoint"/>
+    <!-- 访问支付 -->
+    <oauth:resource-server id="payment" resource-id="payment" token-services-ref="tokenServices" entry-point-ref="oauth2AuthenticationEntryPoint"/>
+    
+
+    <bean id="accessDecisionManager" class="org.springframework.security.access.vote.UnanimousBased" xmlns="http://www.springframework.org/schema/beans">
+        <constructor-arg>
+            <list>
+                <bean class="org.springframework.security.oauth2.provider.vote.ScopeVoter" />
+                <bean class="org.springframework.security.access.vote.RoleVoter" />
+                <bean class="org.springframework.security.access.vote.AuthenticatedVoter" />
+            </list>
+        </constructor-arg>
+    </bean>
+    <http pattern="/openapi/base/**" create-session="never" entry-point-ref="oauth2AuthenticationEntryPoint"
+          access-decision-manager-ref="accessDecisionManager" xmlns="http://www.springframework.org/schema/security">
+        <anonymous enabled="false" />
+        <intercept-url pattern="/openapi/base/**" access="ROLE_USER,SCOPE_BASE" />
+        <custom-filter ref="base" before="PRE_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+    <http pattern="/openapi/resource/**" create-session="never" entry-point-ref="oauth2AuthenticationEntryPoint"
+          access-decision-manager-ref="accessDecisionManager" xmlns="http://www.springframework.org/schema/security">
+        <anonymous enabled="false" />
+        <!--
+        1. 有关资源信息权限(RESOURCE_BASE)
+        获取资源信息列表
+        云资源库关键字搜索资源信息列表
+        获取目录树信息
+        推荐资源信息列表
+        2. 有关个人行为权限(RESOURCE_SHARE)
+        获取我的网盘资源信息列表
+        资源上传接口
+        资源分享接口
+        3. 有关资源评论权限(RESOURCE_COMMENTS)
+        资源打分接口
+        发表资源评论
+        获取资源评论列表接口
+        4. 有关资源下载权限(RESOURCE_DOWNLOAD)
+        资源下载接口
+        -->
+        <intercept-url pattern="/openapi/resource/upload" access="ROLE_USER,SCOPE_RESOURCE_SHARE" />
+        <intercept-url pattern="/openapi/resource/getResourceList" access="ROLE_USER,SCOPE_RESOURCE_BASE" />
+        <custom-filter ref="resource" before="PRE_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+    <http pattern="/openapi/user/**" create-session="never" entry-point-ref="oauth2AuthenticationEntryPoint"
+          access-decision-manager-ref="accessDecisionManager" xmlns="http://www.springframework.org/schema/security">
+        <anonymous enabled="false" />
+        <intercept-url pattern="/openapi/user/**" access="ROLE_USER,SCOPE_BASIC" />
+        <custom-filter ref="user_info" before="PRE_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+    <!-- 忽略认证的 -->
+    <http pattern="/openapi/payment/groupBillingInfos" security="none" xmlns="http://www.springframework.org/schema/security"/>
+     <http pattern="/openapi/payment/updateFreeTime" security="none" xmlns="http://www.springframework.org/schema/security"/>
+    <http pattern="/openapi/payment/**" create-session="never" entry-point-ref="oauth2AuthenticationEntryPoint"
+          access-decision-manager-ref="accessDecisionManager" xmlns="http://www.springframework.org/schema/security">
+        <anonymous enabled="false" />
+        <intercept-url pattern="/openapi/payment/**" access="ROLE_USER,SCOPE_PAYMENT" />
+        <custom-filter ref="payment" before="PRE_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+    <http pattern="/openapi/log" create-session="never" entry-point-ref="oauth2AuthenticationEntryPoint"
+          access-decision-manager-ref="accessDecisionManager" xmlns="http://www.springframework.org/schema/security">
+        <anonymous enabled="false" />
+        <intercept-url pattern="/openapi/log" access="SCOPE_LOG" />
+        <custom-filter ref="log_record" before="PRE_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+    <http pattern="/openapi/message/send" create-session="never" entry-point-ref="oauth2AuthenticationEntryPoint"
+          access-decision-manager-ref="accessDecisionManager" xmlns="http://www.springframework.org/schema/security">
+        <anonymous enabled="false" />
+        <intercept-url pattern="/openapi/message/send" access="SCOPE_MESSAGE_SEND" />
+        <custom-filter ref="message_send" before="PRE_AUTH_FILTER" />
+        <access-denied-handler ref="oauthAccessDeniedHandler" />
+    </http>
+
+    <http entry-point-ref="loginEntryPoint" xmlns="http://www.springframework.org/schema/security">
+        <intercept-url pattern="/checklogin" access="IS_AUTHENTICATED_FULLY" />
+        <custom-filter ref="eduUsernamePasswordAuthenticationFilter" position="FORM_LOGIN_FILTER" />
+        <logout logout-url="/oauth/logout"/>
+    </http>
+
+    <bean id="loginEntryPoint" class="org.springframework.security.web.authentication.LoginUrlAuthenticationEntryPoint">
+        <!-- 默认登录页的url -->
+        <constructor-arg value="/oauth/login" />
+    </bean>
+
+    <bean id="eduUsernamePasswordAuthenticationFilter"
+          class="org.kunteng.ktopenapi.oauth.authentication.EduUsernamePasswordAuthenticationFilter">
+        <property name="filterProcessesUrl" value="/oauth/checklogin"/>
+        <property name="authenticationManager" ref="clientAuthenticationManager" />
+        <property name="authenticationFailureHandler">
+            <bean class="org.springframework.security.web.authentication.SimpleUrlAuthenticationFailureHandler">
+                <!-- 登录失败后的默认Url -->
+                <property name="defaultFailureUrl" value="/oauth/login?error" />
+            </bean>
+        </property>
+    </bean>
+    <bean id="loginAuthenticationProvider" class="org.kunteng.ktopenapi.oauth.authentication.LoginAuthenticationProvider">
+        <property name="oauthLoginService" ref="oauthLoginService"/>
+    </bean>
+    <bean id="oauthLoginService" class="org.kunteng.ktopenapi.oauth.authentication.OauthLoginService">
+        <property name="oauthUserLoginService" ref="oauthUserLoginService"/>
+    </bean>
+</beans>
